@@ -1,0 +1,7 @@
+---
+# Extra vars for a single-VM demo or a lab run:
+#   ansible-playbook site.yml -e @../tests/demo-vars.yml
+demo_backend_enabled: true
+haproxy_header_debug_servers:
+  - {name: web1, address: 127.0.0.1, port: 8081}
+  - {name: web2, address: 127.0.0.1, port: 8082}

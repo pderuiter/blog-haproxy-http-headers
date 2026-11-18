@@ -1,0 +1,18 @@
+---
+# HAProxy branch from the official repositories (see roles/haproxy_install):
+# 3.3 from ppa:vbernat/haproxy-3.3 on Ubuntu 24.04, 3.4 LTS on Debian 13.
+# haproxy_install_version: "3.3"
+
+# Your web servers. The default is the post's web1/web2 (192.168.1.10-11:8080),
+# each answering GET /health.
+# haproxy_header_debug_servers:
+#   - {name: web1, address: 192.168.1.10, port: 8080}
+#   - {name: web2, address: 192.168.1.11, port: 8080}
+
+# DEMO: set to true to run two small header-echo servers on the HAProxy host
+# (127.0.0.1:8081 and :8082) and point web_servers at them. Handy to try the
+# post on one VM; leave false for a real setup.
+demo_backend_enabled: false
+
+# Load the Lua header dump (it then answers /debug/headers)
+# haproxy_header_debug_lua_enabled: false

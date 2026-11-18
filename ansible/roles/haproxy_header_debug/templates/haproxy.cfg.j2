@@ -1,0 +1,105 @@
+# {{ ansible_managed }}
+# /etc/haproxy/haproxy.cfg
+
+global
+    log /dev/log local0 {{ haproxy_header_debug_log_level }}
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+    user haproxy
+    group haproxy
+    daemon
+
+    # Enable Lua for advanced debugging
+{% if haproxy_header_debug_lua_enabled %}
+    tune.lua.bool-sample-conversion normal
+    lua-load /etc/haproxy/lua/debug-headers.lua
+{% else %}
+    # lua-load /etc/haproxy/lua/debug-headers.lua
+{% endif %}
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    # no "option forwardfor": X-Forwarded-For is set explicitly below
+    timeout connect 5s
+    timeout client  50s
+    timeout server  50s
+
+# Stats with header info
+listen stats
+    bind *:{{ haproxy_header_debug_stats_port }}
+    stats enable
+    stats uri /stats
+    stats refresh 5s
+    http-request use-service prometheus-exporter if { path /metrics }
+
+frontend http_frontend
+    bind *:{{ haproxy_header_debug_http_port }}
+
+    # Generate unique request ID
+    unique-id-format %{+X}o\ %ci:%cp_%fi:%fp_%Ts_%rt:%pid
+    unique-id-header X-Request-ID
+
+    # Capture headers for logging
+    capture request header Host len 50
+    capture request header User-Agent len 100
+    capture request header X-Forwarded-For len 50
+    capture request header Authorization len 20
+    capture request header Content-Type len 50
+    capture request header Cookie len 100
+    capture request header X-Request-ID len 50
+
+    capture response header Content-Type len 50
+    capture response header Location len 200
+    capture response header Set-Cookie len 100
+    capture response header Cache-Control len 50
+
+    # Detailed log format
+{% raw %}
+    log-format "%ci:%cp [%tr] %ft %b/%s %TR/%Tw/%Tc/%Tr/%Ta %ST %B %CC %CS %tsc %ac/%fc/%bc/%sc/%rc %sq/%bq {%hrl} {%hsl} %{+Q}r"
+{% endraw %}
+
+    # Remove potentially spoofed headers
+    http-request del-header X-Forwarded-For
+    http-request del-header X-Real-IP
+    http-request del-header X-Forwarded-Proto
+
+    # Add trusted forwarding headers
+    http-request set-header X-Forwarded-For %[src]
+    http-request set-header X-Real-IP %[src]
+    http-request set-header X-Forwarded-Proto http
+    http-request set-header X-Forwarded-Host %[req.hdr(Host)]
+    http-request set-header X-Forwarded-Port %[dst_port]
+
+    # Debug endpoints
+    acl is_debug_headers path /debug/headers
+    acl is_debug_json path /debug/json
+
+{% if haproxy_header_debug_lua_enabled %}
+    http-request use-service lua.debug_headers if is_debug_headers
+{% else %}
+    http-request return status 200 content-type "text/plain" lf-string "Client: %[src]:%[src_port]\nHost: %[req.hdr(Host)]\nMethod: %[method]\nPath: %[path]\nQuery: %[query]\nProtocol: %[req.ver]\nUser-Agent: %[req.hdr(User-Agent)]\nAccept: %[req.hdr(Accept)]\nContent-Type: %[req.hdr(Content-Type)]\nX-Request-ID: %[unique-id]\nCookies: %[req.hdr(Cookie)]" if is_debug_headers
+{% endif %}
+
+    http-request return status 200 content-type "application/json" lf-string '{"client_ip":"%[src]","host":"%[req.hdr(Host)]","method":"%[method]","path":"%[path]","request_id":"%[unique-id]"}' if is_debug_json
+
+    default_backend web_servers
+
+backend web_servers
+    balance roundrobin
+    option httpchk GET /health
+
+    # Remove server identification from responses
+    http-response del-header Server
+    http-response del-header X-Powered-By
+
+    # Add debug headers to response
+    http-response set-header X-Backend-Server %s
+    http-response set-header X-Request-ID %[unique-id]
+    http-response set-header X-Response-Time %Ta
+
+{% for s in haproxy_header_debug_servers %}
+    server {{ s.name }} {{ s.address }}:{{ s.port }} check
+{% endfor %}

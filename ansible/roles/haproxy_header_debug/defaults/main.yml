@@ -1,0 +1,18 @@
+---
+# Values from the post's "Complete Debug Configuration".
+haproxy_header_debug_http_port: 80
+haproxy_header_debug_stats_port: 8404
+
+# "log /dev/log local0 debug" in the post; rsyslog writes it to /var/log/haproxy.log
+haproxy_header_debug_log_level: debug
+
+# The post's web servers (option httpchk GET /health)
+haproxy_header_debug_servers:
+  - {name: web1, address: 192.168.1.10, port: 8080}
+  - {name: web2, address: 192.168.1.11, port: 8080}
+
+# The Lua header dump from "Lua Scripting for Advanced Debugging". The script
+# is always installed in /etc/haproxy/lua/; set this to true to load it (as in
+# the post, it then answers /debug/headers instead of the plain-text
+# "http-request return" endpoint).
+haproxy_header_debug_lua_enabled: false

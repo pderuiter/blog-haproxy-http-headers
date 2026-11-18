@@ -1,0 +1,46 @@
+---
+- name: Install rsyslog (writes /var/log/haproxy.log) and socat (runtime API)
+  ansible.builtin.apt:
+    name:
+      - rsyslog
+      - socat
+    state: present
+
+- name: Enable and start rsyslog
+  ansible.builtin.systemd_service:
+    name: rsyslog
+    enabled: true
+    state: started
+
+- name: Create /etc/haproxy/lua
+  ansible.builtin.file:
+    path: /etc/haproxy/lua
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Lua header dump script
+  ansible.builtin.copy:
+    src: debug-headers.lua
+    dest: /etc/haproxy/lua/debug-headers.lua
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload haproxy
+
+- name: Deploy /etc/haproxy/haproxy.cfg
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: Reload haproxy
+
+- name: Enable and start HAProxy
+  ansible.builtin.systemd_service:
+    name: haproxy
+    enabled: true
+    state: started

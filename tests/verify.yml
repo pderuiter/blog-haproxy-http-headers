@@ -1,0 +1,106 @@
+---
+# Functional checks from the post. Run after site.yml, from the ansible/ directory:
+#   ansible-playbook ../tests/verify.yml
+# The backend checks expect live web servers (for example tests/demo-vars.yml).
+- name: Verify HAProxy header debugging
+  hosts: haproxy
+  gather_facts: false
+  become: true
+  vars:
+    verify_url: http://127.0.0.1
+  tasks:
+    - name: Validate the configuration (haproxy -c)
+      ansible.builtin.command: haproxy -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+
+    - name: Wait until both web servers are UP
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "show stat" | socat stdio /run/haproxy/admin.sock | cut -d',' -f1,2,18
+      args:
+        executable: /bin/bash
+      register: verify_stat
+      changed_when: false
+      until: verify_stat.stdout_lines | select('match', '^web_servers,web[0-9]+,UP') | list | length == 2
+      retries: 10
+      delay: 3
+
+    - name: Call /debug/headers with a custom and a spoofed header
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/debug/headers"
+        headers:
+          Host: example.com
+          X-Custom: test
+          X-Forwarded-For: 1.2.3.4
+        return_content: true
+      register: verify_debug
+
+    - name: Show /debug/headers
+      ansible.builtin.debug:
+        var: verify_debug.content_lines | default(verify_debug.content.split('\n'))
+
+    - name: Check that /debug/headers shows the request
+      ansible.builtin.assert:
+        that:
+          - verify_debug.content is search('example.com')
+          - verify_debug.content is search('(?i)x-request-id')
+
+    - name: Call /debug/json
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/debug/json"
+        return_content: true
+      register: verify_json
+      failed_when: verify_json.json.client_ip is not defined or verify_json.json.request_id | length == 0
+
+    - name: Request a page from the web servers with a spoofed X-Forwarded-For
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/"
+        headers:
+          X-Forwarded-For: 1.2.3.4
+          X-Real-IP: 1.2.3.4
+        return_content: true
+      register: verify_page
+
+    - name: Check request and response headers
+      ansible.builtin.assert:
+        that:
+          # spoofed values are removed, HAProxy sets its own (HAProxy sends
+          # header names in lower case)
+          - verify_page.content is not search('1\.2\.3\.4')
+          - verify_page.content is search('(?i)x-forwarded-for:\s127\.0\.0\.1')
+          - verify_page.content is search('(?i)x-real-ip:\s127\.0\.0\.1')
+          - verify_page.content is search('(?i)x-forwarded-proto:\shttp')
+          - verify_page.content is search('(?i)x-request-id:\s')
+          # response headers: Server and X-Powered-By removed, debug headers added
+          - verify_page.server is not defined
+          - verify_page.x_powered_by is not defined
+          - verify_page.x_backend_server is match('web[0-9]+')
+          - verify_page.x_request_id | length > 0
+          - verify_page.x_response_time is defined
+
+    - name: Two requests are balanced over both servers (roundrobin)
+      ansible.builtin.uri:
+        url: "{{ verify_url }}/"
+      register: verify_rr
+      loop: [1, 2]
+
+    - name: Check roundrobin
+      ansible.builtin.assert:
+        that:
+          - verify_rr.results | map(attribute='x_backend_server') | unique | list | length == 2
+
+    - name: Find the captured headers in /var/log/haproxy.log
+      ansible.builtin.shell: |
+        set -o pipefail
+        grep 'http_frontend web_servers/' /var/log/haproxy.log | tail -1
+      args:
+        executable: /bin/bash
+      register: verify_log
+      changed_when: false
+      until: verify_log.stdout is search('\{127\.0\.0\.1[| ]ansible-httpget')
+      retries: 5
+      delay: 2
+
+    - name: Show the last log line
+      ansible.builtin.debug:
+        var: verify_log.stdout

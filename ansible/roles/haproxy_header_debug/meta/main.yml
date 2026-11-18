@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  role_name: haproxy_header_debug
+  namespace: pderuiter
+  author: Patrick de Ruiter
+  description: HAProxy HTTP header logging, manipulation and debug endpoints, as in the post's complete debug configuration
+  license: MIT
+  min_ansible_version: "2.15"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - noble
+    - name: Debian
+      versions:
+        - trixie
+  galaxy_tags:
+    - haproxy
+    - loadbalancer
+    - http
+
+dependencies: []
